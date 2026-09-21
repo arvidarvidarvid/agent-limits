@@ -32,7 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private nonisolated func appearanceChanged() {
-        Task { @MainActor in self.updateTitle(with: self.lastResults) }
+        Task { @MainActor in
+            self.updateTitle(with: self.lastResults)
+            self.rebuildMenu(with: self.lastResults)
+        }
     }
 
     // MARK: Fetch
@@ -152,22 +155,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// An inline logo sized to sit on the text baseline.
-    private func logoAttachment(_ image: NSImage, font: NSFont) -> NSAttributedString {
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        let side = image.size.height
-        // Nudge down so the glyph is vertically centered against the cap height.
-        let y = (font.capHeight - side) / 2
-        attachment.bounds = CGRect(x: 0, y: y, width: side, height: side)
-        return NSAttributedString(attachment: attachment)
-    }
-
     private func rebuildMenu(with results: [ProviderUsage]?) {
         menu.removeAllItems()
 
         guard let results else {
-            menu.addItem(disabled("Loading…"))
+            menu.addItem(infoRow("Loading…"))
             addFooter()
             return
         }
@@ -175,20 +167,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for usage in results {
             let header = NSMenuItem(title: usage.provider, action: nil, keyEquivalent: "")
             let bold = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-            let title = NSMutableAttributedString()
-            if let logo = Logo.forProvider(usage.provider, size: 14) {
-                title.append(logoAttachment(logo, font: bold))
-                title.append(NSAttributedString(string: "  "))
-            }
-            title.append(NSAttributedString(string: usage.provider,
-                attributes: [.font: bold, .foregroundColor: NSColor.labelColor]))
-            header.attributedTitle = title
+            // Native menu images preserve template tinting in both appearances.
+            header.image = Logo.forProvider(usage.provider, size: 14)
+            header.attributedTitle = NSAttributedString(string: usage.provider,
+                attributes: [.font: bold, .foregroundColor: NSColor.labelColor])
             menu.addItem(header)
 
             if let error = usage.error {
-                menu.addItem(disabled("  \(error)"))
+                menu.addItem(infoRow("  \(error)"))
             } else if usage.windows.isEmpty {
-                menu.addItem(disabled("  no active limits"))
+                menu.addItem(infoRow("  no active limits"))
             } else {
                 for window in usage.windows {
                     menu.addItem(windowItem(window))
@@ -216,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             attributes: [.font: mono, .foregroundColor: color]))
         if let reset = window.resetsAt {
             s.append(NSAttributedString(string: "  · resets \(Format.relative(reset))",
-                attributes: [.font: mono, .foregroundColor: NSColor.secondaryLabelColor]))
+                attributes: [.font: mono, .foregroundColor: NSColor.labelColor]))
         }
         return staticRow(s)
     }
@@ -265,11 +253,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Appearance-adaptive usage color, for the dropdown bars.
+    /// Opaque, appearance-adaptive text colors. Text needs stronger contrast
+    /// than the muted chip fills, especially over a translucent dark menu.
     static func usageColor(_ percent: Double) -> NSColor {
-        let pair = usageColorPair(percent)
+        let light: NSColor
+        let dark: NSColor
+        switch percent {
+        case ..<50:
+            light = NSColor(srgbRed: 0.18, green: 0.40, blue: 0.22, alpha: 1)
+            dark = NSColor(srgbRed: 0.72, green: 0.92, blue: 0.73, alpha: 1)
+        case ..<80:
+            light = NSColor(srgbRed: 0.48, green: 0.32, blue: 0.09, alpha: 1)
+            dark = NSColor(srgbRed: 1.00, green: 0.84, blue: 0.56, alpha: 1)
+        default:
+            light = NSColor(srgbRed: 0.62, green: 0.23, blue: 0.21, alpha: 1)
+            dark = NSColor(srgbRed: 1.00, green: 0.71, blue: 0.69, alpha: 1)
+        }
         return NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? pair.dark : pair.light
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
         }
     }
 
@@ -288,7 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func addFooter() {
         if let lastUpdated {
-            menu.addItem(disabled("Updated \(Format.time(lastUpdated))"))
+            menu.addItem(infoRow("Updated \(Format.time(lastUpdated))"))
         }
         let refreshItem = NSMenuItem(title: "Refresh now", action: #selector(refreshClicked), keyEquivalent: "r")
         refreshItem.target = self
@@ -305,17 +306,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
     }
 
-    private func disabled(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
+    private func infoRow(_ title: String) -> NSMenuItem {
         let mono = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        // Force full-contrast text: a disabled item is otherwise greyed out by
-        // AppKit, which reads as "faded". An explicit color overrides that.
-        item.attributedTitle = NSAttributedString(string: title, attributes: [
+        // Custom labels retain readable text instead of disabled-menu dimming.
+        return staticRow(NSAttributedString(string: title, attributes: [
             .font: mono,
             .foregroundColor: NSColor.labelColor,
-        ])
-        return item
+        ]))
     }
 
     @objc private func refreshClicked() { refresh() }
@@ -350,6 +347,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
+        // Recompute countdowns even when the cached usage is still fresh.
+        rebuildMenu(with: lastResults)
         // Freshen whenever the user opens the menu, unless we just fetched.
         if let lastUpdated, Date().timeIntervalSince(lastUpdated) < 30 { return }
         refresh()
@@ -374,9 +373,15 @@ enum Format {
         return f.string(from: date)
     }
 
-    static func relative(_ date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
-        return f.localizedString(for: date, relativeTo: Date())
+    static func relative(_ date: Date, relativeTo now: Date = Date()) -> String {
+        let remaining = date.timeIntervalSince(now)
+        guard remaining > 0 else { return "now" }
+        let minutes = Int(remaining / 60)
+        let hours = minutes / 60
+        let days = hours / 24
+        if days > 0 { return "in \(days)d \(hours % 24)h" }
+        if hours > 0 { return "in \(hours)h \(minutes % 60)m" }
+        if minutes > 0 { return "in \(minutes)m" }
+        return "in <1m"
     }
 }
