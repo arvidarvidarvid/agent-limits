@@ -47,18 +47,35 @@ enum Credentials {
     /// All generic-password items for a service. There can be more than one
     /// (e.g. keyed by email vs unix username); return them all so the caller
     /// can pick the freshest instead of whichever the keychain hands back first.
+    ///
+    /// Two steps, because macOS rejects kSecReturnData combined with
+    /// kSecMatchLimitAll for password items (errSecParam): list the matching
+    /// accounts first, then fetch each item's data on its own.
     private static func keychainData(service: String) -> [Data] {
-        let query: [String: Any] = [
+        let listQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll,
         ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return [] }
-        if let many = result as? [Data] { return many }
-        if let one = result as? Data { return [one] }
-        return []
+        var listResult: CFTypeRef?
+        guard SecItemCopyMatching(listQuery as CFDictionary, &listResult) == errSecSuccess,
+              let items = listResult as? [[String: Any]] else { return [] }
+
+        return items.compactMap { item in
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ]
+            if let account = item[kSecAttrAccount as String] as? String {
+                query[kSecAttrAccount as String] = account
+            }
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+            return result as? Data
+        }
     }
 
     private static func parseClaudeBlob(_ data: Data) -> ClaudeBlob? {
