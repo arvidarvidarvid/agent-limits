@@ -75,9 +75,11 @@ decoders walk the JSON loosely, so only the top-level window keys and the
 
 ## Launch at login
 
-`make install` puts the app in `/Applications`. Add it once under
-`System Settings → General → Login Items` so it starts automatically. After that,
-`make install` keeps the installed copy up to date on each change.
+`make install` puts the app in `/Applications`. Tick **Launch at Login** in the
+app's menu once so it starts automatically (it registers itself as a login item
+via `SMAppService`, and shows up under `System Settings → General → Login
+Items`, where it can also be switched off). After that, `make install` keeps the
+installed copy up to date on each change.
 
 ## Layout
 

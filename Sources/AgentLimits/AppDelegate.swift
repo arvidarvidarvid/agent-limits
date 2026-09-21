@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -292,6 +293,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let refreshItem = NSMenuItem(title: "Refresh now", action: #selector(refreshClicked), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
+        if canLaunchAtLogin {
+            let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+            login.target = self
+            // The system owns this setting (it can also be flipped in System
+            // Settings), so read it fresh rather than keeping our own copy.
+            login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            menu.addItem(login)
+        }
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
@@ -310,6 +319,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshClicked() { refresh() }
+
+    // MARK: Launch at login
+
+    /// Login-item registration needs a real bundle; a bare `swift run` binary
+    /// has none, so the menu item is left out there.
+    private var canLaunchAtLogin: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't change Launch at Login"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+        // Registered but switched off in System Settings: only the user can
+        // turn it back on, so take them there.
+        if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        rebuildMenu(with: lastResults)
+    }
 }
 
 extension AppDelegate: NSMenuDelegate {
