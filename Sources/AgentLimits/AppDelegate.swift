@@ -41,9 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Fetch
 
-    private func refresh() {
+    /// Fetch usage. Plain refreshes may be served from the cache shared with the
+    /// CLI; `force` (Refresh now) skips it, though never a rate-limit backoff.
+    private func refresh(force: Bool = false) {
         Task { @MainActor in
-            let results = await Usage.fetchAll()
+            let results = await Usage.fetchAll(force: force)
             self.lastUpdated = Date()
             self.rebuildMenu(with: results)
             self.updateTitle(with: results)
@@ -183,6 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     menu.addItem(windowItem(window))
                 }
             }
+            if let note = usage.note {
+                menu.addItem(infoRow("  \(note)"))
+            }
             menu.addItem(.separator())
         }
         addFooter()
@@ -316,7 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]))
     }
 
-    @objc private func refreshClicked() { refresh() }
+    @objc private func refreshClicked() { refresh(force: true) }
 
     // MARK: Launch at login
 

@@ -74,6 +74,20 @@ agent-limits claude               # just one provider
 agent-limits --json               # machine-readable, for scripts and status lines
 ```
 
+### Caching and rate limits
+
+The usage endpoints rate-limit hard (HTTP 429), and an agent calling the CLI in
+a loop hits that quickly. So every fetch goes through a per-provider cache in
+`~/Library/Caches/agent-limits/`, shared by the app and all CLI calls:
+
+- A response younger than 60 s is reused without a request (`--fresh` in the
+  CLI and **Refresh now** in the app skip this).
+- A lock file per provider makes concurrent callers wait for one request and
+  reuse its result.
+- On a 429, the `Retry-After` delay (or an exponential backoff from 60 s up to
+  30 min) is recorded, and until it passes nobody calls the endpoint; callers
+  get the last good data with a "Rate limited, retrying in …" note.
+
 It exits with status 1 if any requested provider failed to load. Color is used
 only on a terminal and can be turned off with `NO_COLOR=1`. The CLI is a
 separate binary, so the first time it needs the keychain macOS asks again.

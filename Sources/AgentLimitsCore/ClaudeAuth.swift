@@ -49,7 +49,6 @@ enum ClaudeAuth {
 
         // 2. Refresh with the config refresh token. If it has expired or been
         //    revoked, forget it so it can't keep failing, and fall back to disk.
-        let seed = Credentials.claudeSeed()
         var spent: String?
         if let refreshTok = cfg.claudeRefreshToken {
             do {
@@ -62,6 +61,12 @@ enum ClaudeAuth {
                 cfg.save()
             }
         }
+
+        // Only now touch the keychain: each read of another app's item can raise
+        // a macOS access prompt, and the ad-hoc signature changes on every
+        // rebuild, so "Always Allow" doesn't stick. With a working refresh
+        // chain in the config we never get here.
+        let seed = Credentials.claudeSeed()
 
         // 3. A still-fresh keychain access token needs no refresh at all.
         if let seed, seed.expiresAtMillis > now + freshnessMarginMillis {
@@ -128,25 +133,5 @@ enum ClaudeAuth {
         let expiresIn = (root["expires_in"] as? NSNumber)?.doubleValue ?? 0
         let expiresAt = Int((Date().timeIntervalSince1970 + expiresIn) * 1000)
         return Credentials.ClaudeBlob(accessToken: access, refreshToken: newRefresh, expiresAtMillis: expiresAt)
-    }
-}
-
-/// An exclusive advisory lock on a file, held from init until unlock(). Blocks
-/// while another process holds it (only ever for the length of one refresh).
-private final class FileLock {
-    private var fd: Int32
-
-    init(_ url: URL) {
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        fd = open(url.path, O_CREAT | O_RDWR, 0o600)
-        if fd >= 0 { flock(fd, LOCK_EX) }
-    }
-
-    func unlock() {
-        guard fd >= 0 else { return }
-        flock(fd, LOCK_UN)
-        close(fd)
-        fd = -1
     }
 }

@@ -5,23 +5,30 @@ import AgentLimitsCore
 // credentials and token cache as the menu bar app.
 
 let usage = """
-Usage: agent-limits [claude|codex] [--json]
+Usage: agent-limits [claude|codex] [--json] [--fresh]
 
 Shows how much of each subscription's rate-limit windows is used and when
 they reset. With no provider, shows both.
 
+Results are cached for a minute and shared with the menu bar app, so calling
+this often (e.g. from an agent) doesn't trip the providers' rate limits. When
+a provider does rate-limit, the last good data is shown with a note.
+
 Options:
   --json      Print machine-readable JSON instead of a table
+  --fresh     Skip the one-minute cache (a rate-limit backoff still applies)
   -h, --help  Show this help
 
 Exit status is 1 if any requested provider failed to load.
 """
 
 var json = false
+var fresh = false
 var providers: [String] = []
 for arg in CommandLine.arguments.dropFirst() {
     switch arg.lowercased() {
     case "--json": json = true
+    case "--fresh": fresh = true
     case "-h", "--help": print(usage); exit(0)
     case "claude", "codex": providers.append(arg.lowercased())
     default:
@@ -33,7 +40,7 @@ if providers.isEmpty { providers = ["claude", "codex"] }
 
 let results: [ProviderUsage] = await withTaskGroup(of: (Int, ProviderUsage).self) { group in
     for (i, name) in providers.enumerated() {
-        group.addTask { (i, name == "claude" ? await Usage.fetchClaude() : await Usage.fetchCodex()) }
+        group.addTask { (i, name == "claude" ? await Usage.fetchClaude(force: fresh) : await Usage.fetchCodex(force: fresh)) }
     }
     var out: [(Int, ProviderUsage)] = []
     for await r in group { out.append(r) }
@@ -71,6 +78,8 @@ if json {
             },
         ]
         if let e = p.error { o["error"] = e }
+        if let n = p.note { o["note"] = n }
+        if let at = p.fetchedAt { o["fetchedAt"] = iso.string(from: at) }
         return o
     }
     let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
@@ -92,6 +101,7 @@ if json {
                 print(line)
             }
         }
+        if let n = p.note { print("  \(n)") }
     }
 }
 
