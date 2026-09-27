@@ -1,7 +1,9 @@
 APP  = build/AgentLimits.app
 DEST = /Applications/AgentLimits.app
+# Where `make install-cli` puts the `agent-limits` command.
+BIN_DIR ?= $(HOME)/.local/bin
 
-.PHONY: build run install clean
+.PHONY: build run install install-cli clean
 
 # Compile and assemble the .app bundle into build/.
 build:
@@ -19,6 +21,13 @@ install: build
 	codesign --force --sign - "$(DEST)"
 	open "$(DEST)"
 	@echo "Installed and launched: $(DEST)"
+
+# Build and install the `agent-limits` CLI into $(BIN_DIR).
+install-cli:
+	swift build -c release --product agent-limits
+	mkdir -p "$(BIN_DIR)"
+	cp "$$(swift build -c release --show-bin-path)/agent-limits" "$(BIN_DIR)/agent-limits"
+	@echo "Installed: $(BIN_DIR)/agent-limits"
 
 clean:
 	rm -rf .build build

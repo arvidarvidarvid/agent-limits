@@ -3,28 +3,28 @@ import Foundation
 /// One rate-limit window as the menu renders it: a human label, how much of the
 /// window is used (0...100), when it resets, and what role it plays (so the
 /// menu-bar title can pick, say, the weekly window specifically).
-struct RateWindow: Identifiable {
-    enum Kind { case session, weekly, weeklyScoped, spend, other }
+public struct RateWindow: Identifiable, Sendable {
+    public enum Kind: String, Sendable { case session, weekly, weeklyScoped, spend, other }
 
-    let id = UUID()
-    let label: String
-    let usedPercent: Double
-    let resetsAt: Date?
-    var kind: Kind = .other
+    public let id = UUID()
+    public let label: String
+    public let usedPercent: Double
+    public let resetsAt: Date?
+    public var kind: Kind = .other
 }
 
 /// Everything the menu shows for a single subscription.
-struct ProviderUsage {
-    let provider: String
-    var windows: [RateWindow]
-    var error: String?
+public struct ProviderUsage: Sendable {
+    public let provider: String
+    public var windows: [RateWindow]
+    public var error: String?
 
     static func failed(_ provider: String, _ message: String) -> ProviderUsage {
         ProviderUsage(provider: provider, windows: [], error: message)
     }
 }
 
-enum Usage {
+public enum Usage {
     private static let session = URLSession(configuration: {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 15
@@ -32,7 +32,7 @@ enum Usage {
         return c
     }())
 
-    static func fetchAll() async -> [ProviderUsage] {
+    public static func fetchAll() async -> [ProviderUsage] {
         async let claude = fetchClaude()
         async let codex = fetchCodex()
         return await [claude, codex]
@@ -40,7 +40,7 @@ enum Usage {
 
     // MARK: Claude
 
-    static func fetchClaude() async -> ProviderUsage {
+    public static func fetchClaude() async -> ProviderUsage {
         do {
             let token = try await ClaudeAuth.accessToken(session: session)
             var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
@@ -58,7 +58,7 @@ enum Usage {
 
     // MARK: Codex
 
-    static func fetchCodex() async -> ProviderUsage {
+    public static func fetchCodex() async -> ProviderUsage {
         do {
             let token = try Credentials.codex()
             var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)

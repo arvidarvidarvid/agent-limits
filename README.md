@@ -60,6 +60,24 @@ and relaunches. For a pure code loop you can also `swift run`.
 On first launch macOS asks for permission to read the Claude token from your
 login keychain. Click **Always Allow**.
 
+## Command line
+
+The `agent-limits` CLI prints the same numbers in the terminal. It shares the
+app's credentials and token cache (`~/.config/agent-limits/config.json`), so a
+token either one renews is picked up by the other; refreshes are serialized
+across processes with a lock file next to the config.
+
+```sh
+make install-cli                  # installs to ~/.local/bin (override with BIN_DIR=...)
+agent-limits                      # both providers, as a table
+agent-limits claude               # just one provider
+agent-limits --json               # machine-readable, for scripts and status lines
+```
+
+It exits with status 1 if any requested provider failed to load. Color is used
+only on a terminal and can be turned off with `NO_COLOR=1`. The CLI is a
+separate binary, so the first time it needs the keychain macOS asks again.
+
 ## Verifying the API shapes
 
 The two providers occasionally change their JSON. If a provider shows "no active
@@ -69,7 +87,7 @@ limits" when it shouldn't, dump the live responses and compare field names:
 scripts/probe.sh
 ```
 
-Then adjust the key names in `Sources/AgentLimits/Decoders.swift` to match. The
+Then adjust the key names in `Sources/AgentLimitsCore/Decoders.swift` to match. The
 decoders walk the JSON loosely, so only the top-level window keys and the
 `utilization` / `used_percent` / reset fields need to line up.
 
@@ -83,14 +101,21 @@ installed copy up to date on each change.
 
 ## Layout
 
-- `Sources/AgentLimits/Credentials.swift` reads the keychain and `auth.json`.
-- `Sources/AgentLimits/ClaudeAuth.swift` refreshes the Claude token when stale.
-- `Sources/AgentLimits/Usage.swift` fetches both endpoints and normalizes results.
-- `Sources/AgentLimits/Decoders.swift` maps each provider's JSON to windows.
-- `Sources/AgentLimits/Logos.swift` draws the provider marks as vectors.
+`AgentLimitsCore` is a library shared by the app and the CLI:
+
+- `Sources/AgentLimitsCore/Credentials.swift` reads the keychain and `auth.json`.
+- `Sources/AgentLimitsCore/ClaudeAuth.swift` refreshes the Claude token when stale.
+- `Sources/AgentLimitsCore/Usage.swift` fetches both endpoints and normalizes results.
+- `Sources/AgentLimitsCore/Decoders.swift` maps each provider's JSON to windows.
+- `Sources/AgentLimitsCore/Config.swift` reads and writes `~/.config/agent-limits/config.json`.
+- `Sources/AgentLimitsCore/Format.swift` has the text bar and reset-time helpers.
+
+Front ends:
+
 - `Sources/AgentLimits/AppDelegate.swift` builds the `NSStatusItem` menu.
-- `Sources/AgentLimits/Config.swift` reads and writes `~/.config/agent-limits/config.json`.
-- `Makefile` has the `build` / `run` / `install` / `clean` targets.
+- `Sources/AgentLimits/Logos.swift` draws the provider marks as vectors.
+- `Sources/AgentLimitsCLI/main.swift` is the `agent-limits` command.
+- `Makefile` has the `build` / `run` / `install` / `install-cli` / `clean` targets.
 - `scripts/build_app.sh` wraps the binary into a menu-bar-only `.app`.
 - `scripts/probe.sh` dumps the raw usage JSON for verifying field names.
 - `scripts/claude_refresh.sh` seeds the Claude token chain from the keychain.
@@ -99,4 +124,5 @@ installed copy up to date on each change.
 
 Add a fetcher in `Usage.swift` and a decoder in `Decoders.swift` that returns a
 `ProviderUsage`, then include it in `Usage.fetchAll()`. The menu renders whatever
-providers that returns.
+providers that returns; to expose it in the CLI, add its name to the argument
+parsing in `Sources/AgentLimitsCLI/main.swift`.

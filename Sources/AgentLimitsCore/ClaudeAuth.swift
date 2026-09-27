@@ -33,6 +33,20 @@ enum ClaudeAuth {
             return at
         }
 
+        // The app and the CLI share this config. Refresh tokens rotate on use, so
+        // two processes refreshing with the same one would make the loser see
+        // invalid_grant and wipe the winner's fresh tokens. Serialize refreshes
+        // across processes, and re-check once we hold the lock: the other
+        // process may have just renewed the token for us.
+        let lock = FileLock(AppConfig.path.deletingLastPathComponent()
+            .appendingPathComponent("auth.lock"))
+        defer { lock.unlock() }
+        cfg = AppConfig.load()
+        if let at = cfg.claudeAccessToken, let exp = cfg.claudeExpiresAt,
+           exp > now + freshnessMarginMillis {
+            return at
+        }
+
         // 2. Refresh with the config refresh token. If it has expired or been
         //    revoked, forget it so it can't keep failing, and fall back to disk.
         let seed = Credentials.claudeSeed()
@@ -114,5 +128,25 @@ enum ClaudeAuth {
         let expiresIn = (root["expires_in"] as? NSNumber)?.doubleValue ?? 0
         let expiresAt = Int((Date().timeIntervalSince1970 + expiresIn) * 1000)
         return Credentials.ClaudeBlob(accessToken: access, refreshToken: newRefresh, expiresAtMillis: expiresAt)
+    }
+}
+
+/// An exclusive advisory lock on a file, held from init until unlock(). Blocks
+/// while another process holds it (only ever for the length of one refresh).
+private final class FileLock {
+    private var fd: Int32
+
+    init(_ url: URL) {
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        fd = open(url.path, O_CREAT | O_RDWR, 0o600)
+        if fd >= 0 { flock(fd, LOCK_EX) }
+    }
+
+    func unlock() {
+        guard fd >= 0 else { return }
+        flock(fd, LOCK_UN)
+        close(fd)
+        fd = -1
     }
 }
