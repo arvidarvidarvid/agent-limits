@@ -57,8 +57,14 @@ make clean      # remove .build and build
 `/Applications`: it rebuilds, replaces the installed copy, re-signs it (ad-hoc),
 and relaunches. For a pure code loop you can also `swift run`.
 
-On first launch macOS asks for permission to read the Claude token from your
-login keychain. Click **Always Allow**.
+The Claude token is read from the keychain through `/usr/bin/security`, not
+the Security framework, so there is no keychain prompt. The keychain grants
+access per app, and an ad-hoc signed binary's identity is its code hash, which
+changes on every rebuild; reading the item directly re-prompted after each
+build no matter how often you clicked **Always Allow**. Claude Code writes the
+item with `/usr/bin/security`, so that tool is already on its access list. A
+token taken from the keychain is cached in the config until it expires, so the
+keychain is read about once per token lifetime.
 
 ## Command line
 
@@ -89,8 +95,7 @@ a loop hits that quickly. So every fetch goes through a per-provider cache in
   get the last good data with a "Rate limited, retrying in …" note.
 
 It exits with status 1 if any requested provider failed to load. Color is used
-only on a terminal and can be turned off with `NO_COLOR=1`. The CLI is a
-separate binary, so the first time it needs the keychain macOS asks again.
+only on a terminal and can be turned off with `NO_COLOR=1`.
 
 ## Verifying the API shapes
 

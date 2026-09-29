@@ -50,7 +50,8 @@ enum Credentials {
     ///
     /// Two steps, because macOS rejects kSecReturnData combined with
     /// kSecMatchLimitAll for password items (errSecParam): list the matching
-    /// accounts first, then fetch each item's data on its own.
+    /// accounts first (attributes only, which never prompts), then fetch each
+    /// item's secret on its own.
     private static func keychainData(service: String) -> [Data] {
         let listQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -63,19 +64,33 @@ enum Credentials {
               let items = listResult as? [[String: Any]] else { return [] }
 
         return items.compactMap { item in
-            var query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
-            if let account = item[kSecAttrAccount as String] as? String {
-                query[kSecAttrAccount as String] = account
-            }
-            var result: CFTypeRef?
-            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-            return result as? Data
+            securityCLIPassword(service: service, account: item[kSecAttrAccount as String] as? String)
         }
+    }
+
+    /// Read an item's secret through /usr/bin/security rather than
+    /// SecItemCopyMatching. The keychain grants access per app, and an ad-hoc
+    /// signed binary's identity is its code hash, which changes on every
+    /// rebuild, so reading the item directly raised a fresh "wants to use your
+    /// confidential information" prompt after each build ("Always Allow" only
+    /// covered the old binary). Claude Code writes this item with
+    /// /usr/bin/security, so that Apple-signed tool is already on the item's
+    /// access list and reads it without prompting.
+    private static func securityCLIPassword(service: String, account: String?) -> Data? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        var args = ["find-generic-password", "-s", service]
+        if let account { args += ["-a", account] }
+        proc.arguments = args + ["-w"]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = FileHandle.nullDevice
+        do { try proc.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        // -w prints the secret followed by a newline.
+        return data.last == UInt8(ascii: "\n") ? data.dropLast() : data
     }
 
     private static func parseClaudeBlob(_ data: Data) -> ClaudeBlob? {

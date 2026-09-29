@@ -62,14 +62,18 @@ enum ClaudeAuth {
             }
         }
 
-        // Only now touch the keychain: each read of another app's item can raise
-        // a macOS access prompt, and the ad-hoc signature changes on every
-        // rebuild, so "Always Allow" doesn't stick. With a working refresh
+        // Only now read Claude Code's stored login; with a working refresh
         // chain in the config we never get here.
         let seed = Credentials.claudeSeed()
 
-        // 3. A still-fresh keychain access token needs no refresh at all.
+        // 3. A still-fresh keychain access token needs no refresh at all. Cache
+        //    it (without a refresh token, so Claude Code's chain is left alone)
+        //    so step 1 serves it until it expires instead of re-reading the
+        //    keychain on every fetch.
         if let seed, seed.expiresAtMillis > now + freshnessMarginMillis {
+            cfg.claudeAccessToken = seed.accessToken
+            cfg.claudeExpiresAt = seed.expiresAtMillis
+            cfg.save()
             return seed.accessToken
         }
 
